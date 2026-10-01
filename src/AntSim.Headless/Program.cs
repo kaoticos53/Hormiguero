@@ -53,16 +53,52 @@ public static class Program
         int ticks = opts.GetInt("ticks", 4000);
         ulong seed = opts.GetUlong("seed", 1);
         string? replayPath = opts.GetValueOrDefault("replay");
+        string? brainPath = opts.GetValueOrDefault("brain");
 
-        var config = new WorldConfig { EpisodeTicks = ticks };
-        var world = SimWorld.CreateSeeded(config, species, species.BaselineBrainFactory, seed: seed);
+        // Optional evolved brain: champion.neat, with champion.json next to it supplying
+        // the colony's evolved body/plasticity parameters.
+        IAntBrainFactory brainFactory = species.BaselineBrainFactory;
+        AntBody? body = null;
+        PlasticityVector? plasticity = null;
+        string brainLabel = "baseline";
+        if (brainPath is not null)
+        {
+            var meta = AntEvolutionExperiment.CreateMetaNeatGenome();
+            var genome = NeatGenomeLoader.Load<double>(brainPath, meta, 0);
+            IGenomeDecoder<NeatGenome<double>, IBlackBox<double>> decoder =
+                NeatGenomeDecoderFactory.CreateGenomeDecoder(meta.IsAcyclic, false);
+            brainFactory = new NeatBrainFactory(decoder.Decode(genome));
+            brainLabel = Path.GetFileName(brainPath);
+
+            string jsonPath = Path.ChangeExtension(brainPath, ".json");
+            if (File.Exists(jsonPath))
+            {
+                var export = JsonSerializer.Deserialize<BrainExport>(File.ReadAllText(jsonPath));
+                if (export is not null)
+                {
+                    body = export.Body;
+                    plasticity = export.Plasticity;
+                    brainLabel += " + evolved body";
+                }
+            }
+        }
+
+        bool nearFood = opts.GetValueOrDefault("food", "far") != "far";
+        var config = new WorldConfig
+        {
+            EpisodeTicks = ticks,
+            MinFoodDistanceFromNest = nearFood ? 120f : 250f,
+            MaxFoodDistanceFromNest = nearFood ? 220f : 350f,
+        };
+        var world = SimWorld.CreateSeeded(config, species, brainFactory, body, plasticity, seed: seed);
 
         Console.WriteLine($"Demo: {species.DisplayName}  |  {config.WorkerCount} workers  |  " +
-                          $"{config.Width}x{config.Height} world  |  seed {seed}");
+                          $"{config.Width}x{config.Height} world  |  seed {seed}  |  brain: {brainLabel}");
         Console.WriteLine($"{"tick",6}  {"delivered",9}  {"pickedUp",9}  {"alive",6}  {"foodLeft",9}");
 
         ReplayRecorder? recorder = replayPath is not null ? new ReplayRecorder(sampleInterval: 10) : null;
 
+        recorder?.Record(world);
         for (int t = 0; t < config.EpisodeTicks; t++)
         {
             world.Step();
@@ -260,7 +296,7 @@ public static class Program
     {
         Console.WriteLine("""
             AntSim headless runner
-              demo      species=black-garden-ant ticks=4000 seed=1 [replay=replay.json]
+              demo      species=black-garden-ant ticks=4000 seed=1 [replay=replay.json] [brain=champion.neat] [food=near|far]
               bench     ticks=4000 runs=3
               evolve    gens=100 popsize=128 seed=12345 [out=output] [species=...] [episodes=2] [ticks=4000] [workers=150]
               evaluate  path=output/champion.neat episodes=3 seed=1000

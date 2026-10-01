@@ -3,6 +3,7 @@
     <Project Path="src/AntSim.Core/AntSim.Core.csproj" />
     <Project Path="src/AntSim.Evolution/AntSim.Evolution.csproj" />
     <Project Path="src/AntSim.Headless/AntSim.Headless.csproj" />
+    <Project Path="src/AntSim.Viewer/AntSim.Viewer.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AntSim.Tests/AntSim.Tests.csproj" />

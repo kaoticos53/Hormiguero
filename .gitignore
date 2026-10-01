@@ -80,6 +80,8 @@ StyleCopReport.xml
 *_h.h
 *.ilk
 *.meta
+# Unity asset metadata is source-controlled for the checked-in viewer project.
+!unity/**/*.meta
 *.obj
 *.iobj
 *.pch
@@ -208,6 +210,9 @@ PublishScripts/
 **/[Pp]ackages/*
 # except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
+# The Unity viewer project needs its package manifest (and lock) versioned.
+!unity/**/[Pp]ackages/manifest.json
+!unity/**/[Pp]ackages/packages-lock.json
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/[Pp]ackages/repositories.config
 # NuGet v3's project.json files produces more ignorable files

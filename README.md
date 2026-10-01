@@ -2,8 +2,9 @@
 
 Simulación realista de uno o varios hormigueros con hormigas controladas por redes neuronales
 que evolucionan con **NEAT** (SharpNEAT 4.1.0) y un GA paralelo de parámetros corporales.
-Núcleo de simulación puro en .NET, sin dependencia de Unity: evoluciona *headless* a máxima
-velocidad y cualquier visor (Unity incluido) consume los cerebros exportados en JSON.
+Núcleo de simulación puro en .NET, sin dependencia de motores: evoluciona *headless* a máxima
+velocidad, y un **visor gráfico en tiempo real (OpenTK/OpenGL)** muestra el hormiguero vivo —
+incluida la opción de ver actuar a un cerebro evolucionado.
 
 ## Arquitectura
 
@@ -16,7 +17,8 @@ velocidad y cualquier visor (Unity incluido) consume los cerebros exportados en 
 │  (determinista)     │     │  JSON del campeón    │     │                    │
 └─────────────────────┘     └──────────────────────┘     └────────────────────┘
           ▲
-          └── futuro visor Unity: consume champion.json + replays JSON
+          ├── AntSim.Viewer      OpenTK/OpenGL en tiempo real
+          └── unity/AntSimViewer Unity 6: consume champion.json + replay.json
 ```
 
 **Decisiones clave**
@@ -37,7 +39,57 @@ velocidad y cualquier visor (Unity incluido) consume los cerebros exportados en 
   implementación. La hormiga negra (*Lasius niger*) es la especie de validación; fuego, ejército
   y cortadora de hojas están definidas para fases posteriores.
 
+## Visor gráfico en tiempo real
+
+`AntSim.Viewer` (OpenTK 4.9 / OpenGL 3.3) renderiza la simulación viva: rastros de feromona
+como mapa de calor (verde = comida, azul = hogar), pilas de comida que encogen al agotarse,
+nido y hormigas orientadas (naranja = cargando comida).
+
+```bash
+./view.sh                                   # línea base, semilla 1  (Windows: view.bat)
+./view.sh seed=42 brain=output/run/champion.neat   # ver un cerebro evolucionado en vivo
+./view.sh --release paused=1                # arrancar en pausa
+```
+
+| Tecla | Acción |
+|-------|--------|
+| `ESPACIO` | Pausar / reanudar |
+| `↑` / `↓` | Velocidad ×1 … ×16 |
+| `R` | Reiniciar con nueva semilla |
+| `F` | Mostrar/ocultar rastros de feromona |
+| `ESC` | Salir |
+
+Opciones: `species=`, `seed=`, `brain=` (champion.neat), `paused=1`, `size=900`,
+y `smoke=N` (auto-test: N fotogramas y salida). El visor no toca el núcleo: lee el estado
+público de `SimWorld` cada fotograma, y la velocidad ×16 sigue siendo fluida.
+
+### Proyecto Unity 6
+
+También se incluye `unity/AntSimViewer`, un proyecto Unity 6 sin dependencias de terceros. Abre esa
+carpeta en Unity Hub y pulsa **Play** incluso desde una escena vacía: `ViewerBootstrap` crea la
+cámara, el controlador y el renderer automáticamente. El proyecto puede cargar directamente:
+
+- `Assets/StreamingAssets/champion.json`: cerebro NEAT exportado, cuerpo y plasticidad.
+- `Assets/StreamingAssets/replay.json`: replay con frames interpolados, comida restante y feromonas
+  visualizadas cuando se genera desde la CLI.
+
+Para crear una escena persistente usa **AntSim > Create Viewer Scene**. Las instrucciones completas,
+controles, builds de escritorio y limitaciones de StreamingAssets están en
+[`unity/AntSimViewer/README.md`](unity/AntSimViewer/README.md). La validación del proyecto Unity
+requiere el Editor; la solución .NET y el visor OpenTK sí se validan automáticamente desde CLI.
+
 ## Uso
+
+Scripts de compilación + ejecución (compilan la solución y lanzan la CLI; sin argumentos
+ejecutan un episodio `demo`; `--release` compila optimizado, recomendado para evoluciones largas):
+
+```bash
+./run.sh                              # bash / Git Bash
+run.bat                               # Windows (cmd)
+./run.sh --release evolve gens=100 popsize=128 out=output/run
+```
+
+Alternativamente, con dotnet directamente:
 
 ```bash
 # Simulación de demostración con el cereal codificado a mano (línea base)
@@ -85,9 +137,9 @@ la maquinaria de co-evolución ya está validada.
 - **Mundo toroidal** 800×800 con hash espacial para consultas de vecinos (O(n)); 6 pilas de comida
   a 250–350 unidades del nido (curriculo de evolución: 120–220).
 - **Replay determinista**: `demo replay=…` exporta fotogramas muestreados de toda la colonia
-  (posiciones, rumbo, carga) en JSON para el visor.
+  (posiciones, rumbo, carga, comida restante y estadísticas) en JSON para los visores.
 
-## Tests (19)
+## Tests (18)
 
 `dotnet test` — determinismo bit a bit (misma semilla ⇒ mismo estado; distinta semilla ⇒ divergencia),
 invariantes de feromonas (conservación de masa en difusión toroidal, saturación, evaporación),
@@ -106,8 +158,8 @@ orden dependiente del planificador de hilos. El historial de cada corrida queda 
 3. **Dinámica de colonia**: reina, cría (brood), muertes y reposición; trofalaxis.
 4. **Segunda especie + competición**: hormiga de fuego (alarma + aguijón), ejército (raids sin nido
    fijo), cortadora (huertos de hongo) — cada una como configuración + mecánicas nuevas.
-5. **Visor Unity**: cargar `champion.json` y `replay.json`; modo interactivo con hormigas vivas
-   usando el cerebro exportado.
+5. ✅ **Visores**: OpenTK en tiempo real y proyecto Unity 6 listo para abrir; ambos consumen
+   `champion.json` y `replay.json`, con replay interpolado, mapa de feromonas y controles de live view.
 
 ## Estructura
 
@@ -115,5 +167,8 @@ orden dependiente del planificador de hilos. El historial de cada corrida queda 
 src/AntSim.Core         Simulación pura: mundo, feromonas, hormigas, cerebros, especies
 src/AntSim.Evolution    SharpNEAT: esquema de evaluación, experimento, GA corporal, export JSON
 src/AntSim.Headless     CLI: demo / bench / evolve / evaluate
-tests/AntSim.Tests      19 tests xUnit (determinismo, invariantes, umbrales, cableado NEAT)
+src/AntSim.Viewer       Visor gráfico en tiempo real (OpenTK/OpenGL)
+unity/AntSimViewer       Proyecto Unity 6 + scripts de live/replay
+tools/replay_map.py      Mapas ASCII de densidad para analizar replays
+tests/AntSim.Tests      18 tests xUnit (determinismo, invariantes, umbrales, cableado NEAT)
 ```

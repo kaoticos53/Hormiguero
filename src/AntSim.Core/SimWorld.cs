@@ -29,6 +29,9 @@ public sealed class SimWorld
     public long FoodDelivered { get; private set; }
     public long FoodPickedUp { get; private set; }
 
+    /// <summary>The seed this world was created with (part of the replay record).</summary>
+    public ulong Seed { get; }
+
     /// <summary>Total food units still remaining in the world's piles.</summary>
     public float FoodRemaining
     {
@@ -48,6 +51,7 @@ public sealed class SimWorld
 
         _config = config;
         _species = species;
+        Seed = seed;
         _rng = new Prng(seed);
         _pickupRadiusSq = config.PickupRadius * config.PickupRadius;
         _antHash = new SpatialHash<Ant>(config.Width, config.Height, MathF.Max(16f, config.PickupRadius * 2f));

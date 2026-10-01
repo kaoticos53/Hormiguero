@@ -1,0 +1,118 @@
+{
+  "InputCount": 15,
+  "OutputCount": 3,
+  "IsAcyclic": false,
+  "ActivationFnName": "LeakyReLU",
+  "CyclesPerActivation": 1,
+  "HiddenNodeIds": [
+    19
+  ],
+  "Connections": [
+    {
+      "SourceId": 0,
+      "TargetId": 16,
+      "Weight": -1.0646209177763581
+    },
+    {
+      "SourceId": 0,
+      "TargetId": 17,
+      "Weight": 1.764007450036905
+    },
+    {
+      "SourceId": 1,
+      "TargetId": 15,
+      "Weight": -0.14181537281777012
+    },
+    {
+      "SourceId": 2,
+      "TargetId": 16,
+      "Weight": 2.589166575692431
+    },
+    {
+      "SourceId": 4,
+      "TargetId": 17,
+      "Weight": 3.939521515752549
+    },
+    {
+      "SourceId": 5,
+      "TargetId": 15,
+      "Weight": 3.708721968163926
+    },
+    {
+      "SourceId": 5,
+      "TargetId": 16,
+      "Weight": -4.579544434068147
+    },
+    {
+      "SourceId": 6,
+      "TargetId": 15,
+      "Weight": 3.218872139038587
+    },
+    {
+      "SourceId": 6,
+      "TargetId": 16,
+      "Weight": -2.036997082877151
+    },
+    {
+      "SourceId": 8,
+      "TargetId": 19,
+      "Weight": -3.595154395124534
+    },
+    {
+      "SourceId": 9,
+      "TargetId": 16,
+      "Weight": 3.883227628187586
+    },
+    {
+      "SourceId": 9,
+      "TargetId": 17,
+      "Weight": 2.6099610944376153
+    },
+    {
+      "SourceId": 10,
+      "TargetId": 15,
+      "Weight": 1.23794814848329
+    },
+    {
+      "SourceId": 11,
+      "TargetId": 15,
+      "Weight": -1.1416697147353454
+    },
+    {
+      "SourceId": 12,
+      "TargetId": 15,
+      "Weight": -2.166948568693163
+    },
+    {
+      "SourceId": 12,
+      "TargetId": 16,
+      "Weight": 4.165797776018735
+    },
+    {
+      "SourceId": 13,
+      "TargetId": 15,
+      "Weight": -2.707233703986074
+    },
+    {
+      "SourceId": 13,
+      "TargetId": 16,
+      "Weight": 3.281864445590416
+    },
+    {
+      "SourceId": 19,
+      "TargetId": 17,
+      "Weight": 5.0149003578027145
+    }
+  ],
+  "Body": {
+    "Speed": 16.100794,
+    "SensorRange": 22.97846,
+    "SensorSpread": 0.68536854,
+    "DepositRate": 1.2758398,
+    "LifespanSeconds": 1214.3965
+  },
+  "Plasticity": {
+    "TrailHabituationRate": 0.020400833,
+    "TrailHabituationMax": 0.3497708
+  }
+}
