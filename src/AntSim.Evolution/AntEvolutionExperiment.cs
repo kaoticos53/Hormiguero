@@ -11,7 +11,7 @@ using SharpNeat.Neat.Genome.Double;
 using SharpNeat.Neat.Reproduction.Asexual;
 using SharpNeat.Neat.Reproduction.Asexual.WeightMutation;
 using SharpNeat.Neat.Reproduction.Sexual;
-using SharpNeat.Neat.Speciation.GeneticKMeans.Parallelized;
+using SharpNeat.Neat.Speciation.GeneticKMeans;
 using SharpNeat.NeuralNets;
 
 namespace AntSim.Evolution;
@@ -55,9 +55,15 @@ public static class AntEvolutionExperiment
         var genomeEvaluator = GenomeListEvaluatorFactory.CreateEvaluator<NeatGenome<double>, IBlackBox<double>>(
             genomeDecoder, scheme, opt.DegreeOfParallelism);
 
-        // K-means speciation (parallel variant), as in SharpNEAT's default wiring.
+        // K-means speciation runs on a single thread on purpose. It is the *only* nondeterministic
+        // stage: the parallel variant reduces floating-point centroid distances in
+        // scheduler-dependent order, so identical seeds drift apart run to run (the README used to
+        // apologise for this). Genome evaluation stays parallel — per-genome fitness is independent
+        // and each episode is bit-reproducible, so evaluating in parallel is deterministic. Peak
+        // populations are at most a few thousand genomes, so serial speciation costs nothing
+        // measurable next to the thousands of episodes behind each generation.
         var distanceMetric = new ManhattanDistanceMetric(1.0, 0.0, 10.0);
-        var speciationStrategy = new GeneticKMeansSpeciationStrategy<double>(distanceMetric, 5, opt.DegreeOfParallelism);
+        var speciationStrategy = new GeneticKMeansSpeciationStrategy<double>(distanceMetric, 5);
 
         var weightMutationScheme = WeightMutationSchemeFactory.CreateDefaultScheme(metaNeatGenome.ConnectionWeightScale);
 

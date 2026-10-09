@@ -9,6 +9,10 @@ namespace AntSim.Evolution;
 /// fitness is the total food delivered to the nest across several seeded episodes.
 /// Colony fitness is both more realistic (nestmates are sisters) and far less noisy than
 /// per-ant fitness. Auxiliary score: food picked up (measures progress before delivery).
+///
+/// <see cref="Evaluate"/> scores on the training lane only: that is the number selection sees.
+/// <see cref="EvaluateOnSeeds"/> exists so the same code can also score the held-out validation
+/// lane for reporting, without ever feeding it back into selection.
 /// </summary>
 public sealed class AntColonyEvaluator : IPhenomeEvaluator<IBlackBox<double>>
 {
@@ -17,17 +21,23 @@ public sealed class AntColonyEvaluator : IPhenomeEvaluator<IBlackBox<double>>
 
     public AntColonyEvaluator(EvolveTaskSettings settings) => _settings = settings;
 
-    public FitnessInfo Evaluate(IBlackBox<double> box)
+    /// <summary>Selection fitness: training lane only.</summary>
+    public FitnessInfo Evaluate(IBlackBox<double> box) => EvaluateOnSeeds(box, _settings.TrainingSeeds);
+
+    /// <summary>
+    /// Score a genome on an explicit seed set. Callers pass the training lane for selection and the
+    /// validation lane for honest reporting; the two must never be mixed in one number.
+    /// </summary>
+    public FitnessInfo EvaluateOnSeeds(IBlackBox<double> box, IReadOnlyList<ulong> seeds)
     {
         box.Reset();
         var factory = new NeatBrainFactory(box);
 
         double delivered = 0;
         double pickedUp = 0;
-        for (int i = 0; i < _settings.EpisodesPerGenome; i++)
+        for (int i = 0; i < seeds.Count; i++)
         {
-            ulong seed = _settings.BaseSeed + (ulong)i;
-            var result = _runner.Run(_settings.Config, _settings.Species, factory, _settings.Body, _settings.Plasticity, seed);
+            var result = _runner.Run(_settings.Config, _settings.Species, factory, _settings.Body, _settings.Plasticity, seeds[i]);
             delivered += result.FoodDelivered;
             pickedUp += result.FoodPickedUp;
         }

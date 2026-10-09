@@ -101,18 +101,56 @@ dotnet run --project src/AntSim.Headless -- bench runs=3 ticks=4000
 # Evolución NEAT + GA corporal (escribe fitness.csv y checkpoints cada 10 generaciones)
 dotnet run --project src/AntSim.Headless -- evolve gens=100 popsize=128 episodes=2 seed=12345 out=output/run
 
-# Evaluar el campeón guardado en semillas no vistas
-dotnet run --project src/AntSim.Headless -- evaluate path=output/run/champion.neat episodes=3
+# Evaluar el campeón en el carril de validación (semillas que la evolución nunca vio)
+dotnet run --project src/AntSim.Headless -- evaluate path=output/run/champion.neat lane=val runseed=12345 episodes=6
+
+# Reproducir el número de entrenamiento del campeón (exactamente las semillas de selección)
+dotnet run --project src/AntSim.Headless -- evaluate path=output/run/champion.neat lane=train runseed=12345 episodes=2
 ```
 
 Opciones de `evolve`: `gens`, `popsize`, `speciescount`, `episodes` (episodios por genoma),
 `ticks` (por episodio), `workers` (hormigas por colonia), `seed`, `food=near|far`
-(curriculo: comida cercana al nido durante la evolución, por defecto `near`).
+(curriculo: comida cercana al nido durante la evolución, por defecto `near`), `valepisodes`
+(episodios de validación, por defecto 3) y `valinterval` (cada cuántas generaciones se informa,
+por defecto 5; la última siempre).
 
-**Salidas de `evolve`** (en `out/`): `fitness.csv` (historial por generación, escrito en streaming),
-`champion.neat` (genoma nativo SharpNEAT, reutilizable con `evaluate`) y `champion.json`
-(export autocontenido: conexiones, pesos, parámetros corporales y plasticidad — formato pensado
-para el visor Unity).
+Opciones de `evaluate`: `path`, `lane=val|train|raw` (por defecto `val`), `runseed` (semilla de la
+corrida cuya carril se quiere reproducir), `episodes`, `ticks`, `food=near|far`, `species` y
+`seed` (solo con `lane=raw`). `evaluate` carga el cuerpo evolucionado de `champion.json`: medir un
+campeón con el cuerpo por defecto no mide a ese campeón.
+
+**Salidas de `evolve`** (en `out/`): `fitness.csv` (historial por generación, escrito en streaming;
+incluye la columna `validationFitness`), `champion.neat` (genoma nativo SharpNEAT, reutilizable con
+`evaluate`) y `champion.json` (export autocontenido: conexiones, pesos, parámetros corporales y
+plasticidad — formato pensado para el visor Unity).
+
+## Carriles de semillas: entrenamiento vs validación
+
+La selección —fitness NEAT y GA corporal por igual— optimiza **solo** el carril de entrenamiento
+(`seed × 1000 + índice de episodio`). El carril de validación vive mil millones por encima
+(`SeedSpaces`) y únicamente se **lee**, de modo que la diferencia entre ambos mide generalización y
+no suerte en dos mundos concretos. `evolve` imprime ambos carriles al arrancar (para poder
+reproducir el run) y `fitness.csv` lleva la columna `validationFitness`.
+
+Medición del campeón de `output/run6` (`seed=424242`, entrenado con curriculo `food=near`), a 4.000
+ticks y 150 obreras:
+
+| carril | comida | episodios | entregado/ep | % del techo | fitness/ep |
+|---|---|---|---|---|---|
+| train | near (120–220) | 2 — los de selección | 360,0 | 100 % | 378,0 |
+| val | near | 3 | 356,7 | 99,1 % | 374,7 |
+| train | far (250–350) | 6 | 323,8 | 90,0 % | 340,7 |
+| val | far | 6 | 334,3 | 92,9 % | 351,7 |
+
+La fila 1 reproduce el best de la generación 120 de `run6` (378,0 × 2 episodios = **756**) desde el
+CLI, lo que fija el contrato de los carriles. Informar la validación cuesta lo medido: ~670 ms por
+generación (≈5 % de una generación de 64 genomas × 2 episodios de 4.000 ticks con 150 obreras en 16
+núcleos). El carril de validación puntúa *igual o mejor* que el
+de entrenamiento: este campeón no tiene optimismo de semillas, generaliza. Lo que sí aparece es lo
+contrario — el fitness de entrenamiento está **saturado** (100 % del techo en los mundos `near`), así
+que no puede distinguir entre dos colonias perfectas, y la dispersión entre mundos (268–359
+entregados) supera cualquier diferencia train/val. Para que la métrica vuelva a discriminar hay que
+endurecer la tarea (mundo mayor, comida más lejos, coste de cargar) antes que añadir generaciones.
 
 ## Resultados de validación (24 generaciones, pop 64, 2 episodios, 2.000 ticks)
 
@@ -139,16 +177,23 @@ la maquinaria de co-evolución ya está validada.
 - **Replay determinista**: `demo replay=…` exporta fotogramas muestreados de toda la colonia
   (posiciones, rumbo, carga, comida restante y estadísticas) en JSON para los visores.
 
-## Tests (18)
+## Tests (27)
 
 `dotnet test` — determinismo bit a bit (misma semilla ⇒ mismo estado; distinta semilla ⇒ divergencia),
 invariantes de feromonas (conservación de masa en difusión toroidal, saturación, evaporación),
-consultas del hash espacial (sin falsos negativos, envoltura toroidal), umbral de la línea base y
-tests estructurales del cableado SharpNEAT (esquema E/S, decodificación, evaluador).
+consultas del hash espacial (sin falsos negativos, envoltura toroidal), umbral de la línea base,
+tests estructurales del cableado SharpNEAT (esquema E/S, decodificación, evaluador), el contrato de
+los carriles de semillas (disjunción train/val para cualquier corrida, layout histórico intacto) y
+que el fitness del evaluador sea reproducible desde el carril de entrenamiento, con la validación
+fuera de muestra informada por el runner, y que **la evolución entera sea bit-reproducible** (dos
+corridas del mismo seed dan el mismo historial).
 
-**Nota sobre determinismo**: la simulación es bit-a-bit reproducible; la *evolución* completa no
-lo es exactamente porque la especiación k-means paralelizada de SharpNEAT reduce flotantes en
-orden dependiente del planificador de hilos. El historial de cada corrida queda en `fitness.csv`.
+**Nota sobre determinismo**: la simulación y **también la evolución** son bit-a-bit reproducibles.
+La especiación k-means de SharpNEAT corría en paralelo y reducía flotantes en orden dependiente del
+planificador; ahora corre en un solo hilo (`AntEvolutionExperiment`) y la evolución deja de divergir
+entre corridas idénticas. La evaluación de genomas sigue en paralelo: es determinista porque el
+fitness de cada genoma es independiente y cada episodio ya era reproducible. El historial de cada
+corrida queda en `fitness.csv`.
 
 ## Hoja de ruta
 
@@ -170,5 +215,5 @@ src/AntSim.Headless     CLI: demo / bench / evolve / evaluate
 src/AntSim.Viewer       Visor gráfico en tiempo real (OpenTK/OpenGL)
 unity/AntSimViewer       Proyecto Unity 6 + scripts de live/replay
 tools/replay_map.py      Mapas ASCII de densidad para analizar replays
-tests/AntSim.Tests      18 tests xUnit (determinismo, invariantes, umbrales, cableado NEAT)
+tests/AntSim.Tests      27 tests xUnit (determinismo, invariantes, umbrales, cableado NEAT, carriles)
 ```

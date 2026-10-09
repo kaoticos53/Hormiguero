@@ -2,12 +2,6 @@ using System.Globalization;
 using System.Text.Json;
 using AntSim.Core;
 using AntSim.Evolution;
-using SharpNeat;
-using SharpNeat.Evaluation;
-using SharpNeat.Neat.EvolutionAlgorithm;
-using SharpNeat.Neat.Genome;
-using SharpNeat.Neat.Genome.Double;
-using SharpNeat.Neat.Genome.IO;
 
 namespace AntSim.Headless;
 
@@ -16,10 +10,10 @@ namespace AntSim.Headless;
 /// app drives it for demos, benchmarks, NEAT evolution runs and champion evaluation.
 ///
 /// Commands (key=value options, all optional):
-///   demo    species=black-garden-ant ticks=4000 seed=1 [replay=replay.json]
+///   demo    species=black-garden-ant ticks=4000 seed=1 [replay=replay.json] [brain=champion.neat] [food=near|far]
 ///   bench   ticks=4000 runs=3
 ///   evolve  gens=100 popsize=128 species=black-garden-ant seed=12345 out=output
-///   evaluate path=output/champion.neat episodes=3 seed=1000
+///   evaluate path=output/champion.neat lane=val runseed=12345 episodes=3
 /// </summary>
 public static class Program
 {
@@ -55,41 +49,24 @@ public static class Program
         string? replayPath = opts.GetValueOrDefault("replay");
         string? brainPath = opts.GetValueOrDefault("brain");
 
-        // Optional evolved brain: champion.neat, with champion.json next to it supplying
-        // the colony's evolved body/plasticity parameters.
+        // Optional evolved brain: champion.neat plus the companion champion.json that carries the
+        // colony's evolved body/plasticity. Loaded through the shared loader so every command runs
+        // the champion as it was evolved, never on a default body.
         IAntBrainFactory brainFactory = species.BaselineBrainFactory;
         AntBody? body = null;
         PlasticityVector? plasticity = null;
         string brainLabel = "baseline";
         if (brainPath is not null)
         {
-            var meta = AntEvolutionExperiment.CreateMetaNeatGenome();
-            var genome = NeatGenomeLoader.Load<double>(brainPath, meta, 0);
-            IGenomeDecoder<NeatGenome<double>, IBlackBox<double>> decoder =
-                NeatGenomeDecoderFactory.CreateGenomeDecoder(meta.IsAcyclic, false);
-            brainFactory = new NeatBrainFactory(decoder.Decode(genome));
-            brainLabel = Path.GetFileName(brainPath);
-
-            string jsonPath = Path.ChangeExtension(brainPath, ".json");
-            if (File.Exists(jsonPath))
-            {
-                var export = JsonSerializer.Deserialize<BrainExport>(File.ReadAllText(jsonPath));
-                if (export is not null)
-                {
-                    body = export.Body;
-                    plasticity = export.Plasticity;
-                    brainLabel += " + evolved body";
-                }
-            }
+            var champion = ChampionLoader.Load(brainPath);
+            brainFactory = champion.BrainFactory;
+            body = champion.Body;
+            plasticity = champion.Plasticity;
+            brainLabel = champion.Label;
         }
 
         bool nearFood = opts.GetValueOrDefault("food", "far") != "far";
-        var config = new WorldConfig
-        {
-            EpisodeTicks = ticks,
-            MinFoodDistanceFromNest = nearFood ? 120f : 250f,
-            MaxFoodDistanceFromNest = nearFood ? 220f : 350f,
-        };
+        var config = BuildConfig(ticks, nearFood);
         var world = SimWorld.CreateSeeded(config, species, brainFactory, body, plasticity, seed: seed);
 
         Console.WriteLine($"Demo: {species.DisplayName}  |  {config.WorkerCount} workers  |  " +
@@ -171,13 +148,19 @@ public static class Program
             EpisodeTicks = opts.GetInt("ticks", 4000),
             WorkerCount = opts.GetInt("workers", 150),
             Seed = opts.GetUlong("seed", 12345),
+            ValidationEpisodes = opts.GetInt("valepisodes", 3),
+            ValidationEvalInterval = opts.GetInt("valinterval", 5),
             NearFoodCurriculum = opts.GetValueOrDefault("food", "near") != "far",
             OutputDir = outputDir,
         };
 
         Console.WriteLine($"Evolving {species.DisplayName}: gens={opt.Generations} pop={opt.PopulationSize} " +
                           $"episodes/genome={opt.EpisodesPerGenome} ticks={opt.EpisodeTicks} workers={opt.WorkerCount} seed={opt.Seed}");
-        Console.WriteLine($"{"gen",5}  {"best",10}  {"mean",10}  {"complex",8}  {"bodyScore",10}");
+        // Print both lanes: they make the run reproducible and are exactly what `evaluate` takes.
+        Console.WriteLine($"  training seeds   (selection): {string.Join(", ", SeedSpaces.Training(opt.Seed, opt.EpisodesPerGenome))}");
+        Console.WriteLine($"  validation seeds (held out): {string.Join(", ", SeedSpaces.Validation(opt.Seed, opt.ValidationEpisodes))}"
+                        + $"  [reported every {opt.ValidationEvalInterval} gen, never selected on]");
+        Console.WriteLine($"{"gen",5}  {"best",10}  {"mean",10}  {"complex",8}  {"bodyScore",10}  {"validation",10}");
 
         var runner = new AntEvolutionRunner(opt);
         var csvPath = outputDir is null ? null : Path.Combine(outputDir, "fitness.csv");
@@ -186,7 +169,7 @@ public static class Program
         {
             Directory.CreateDirectory(outputDir!);
             csv = new StreamWriter(csvPath);
-            csv.WriteLine("generation,best,mean,bestComplexity,bodyScore");
+            csv.WriteLine("generation,best,mean,bestComplexity,bodyScore,validationFitness");
         }
 
         IReadOnlyList<GenerationRecord> records = [];
@@ -194,12 +177,16 @@ public static class Program
         {
             records = runner.Run(rec =>
             {
+                string validationCell = double.IsNaN(rec.ValidationFitness)
+                    ? "-"
+                    : rec.ValidationFitness.ToString("F2", CultureInfo.InvariantCulture);
                 Console.WriteLine($"{rec.Generation,5}  {rec.BestFitness,10:F2}  {rec.MeanFitness,10:F2}  {rec.BestComplexity,8:F1}  " +
-                                  $"{rec.BodyScore.ToString("F2", CultureInfo.InvariantCulture),10}");
+                                  $"{rec.BodyScore.ToString("F2", CultureInfo.InvariantCulture),10}  {validationCell,10}");
                 csv?.WriteLine(
                     $"{rec.Generation},{rec.BestFitness.ToString(CultureInfo.InvariantCulture)}," +
                     $"{rec.MeanFitness.ToString(CultureInfo.InvariantCulture)},{rec.BestComplexity.ToString("F1", CultureInfo.InvariantCulture)}," +
-                    $"{rec.BodyScore.ToString("F2", CultureInfo.InvariantCulture)}");
+                    $"{rec.BodyScore.ToString("F2", CultureInfo.InvariantCulture)}," +
+                    $"{rec.ValidationFitness.ToString("F4", CultureInfo.InvariantCulture)}");
                 csv?.Flush(); // survive interruptions: every generation is on disk immediately
             });
         }
@@ -221,8 +208,20 @@ public static class Program
     {
         string path = opts.GetValueOrDefault("path", "output/champion.neat");
         int episodes = opts.GetInt("episodes", 3);
-        ulong seed = opts.GetUlong("seed", 1000);
         int ticks = opts.GetInt("ticks", 4000);
+        ulong runSeed = opts.GetUlong("runseed", 12345);
+        string lane = opts.GetValueOrDefault("lane", "val").ToLowerInvariant();
+
+        // Default to the held-out lane: a champion measured on its own training seeds reports
+        // memory, not skill. `lane=train` reproduces the evolution numbers, `lane=raw seed=N` is
+        // the explicit escape hatch for ad-hoc worlds.
+        ulong baseSeed = lane switch
+        {
+            "train" or "training" => SeedSpaces.TrainingBase(runSeed),
+            "val" or "validation" => SeedSpaces.ValidationBase(runSeed),
+            "raw" => opts.GetUlong("seed", 1000),
+            _ => throw new ArgumentException($"Unknown lane '{lane}' (expected train, val or raw)."),
+        };
 
         if (!File.Exists(path))
         {
@@ -231,37 +230,43 @@ public static class Program
             return;
         }
 
-        var meta = AntEvolutionExperiment.CreateMetaNeatGenome();
-        var genome = NeatGenomeLoader.Load<double>(path, meta, 0);
-        IGenomeDecoder<NeatGenome<double>, IBlackBox<double>> decoder =
-            NeatGenomeDecoderFactory.CreateGenomeDecoder(meta.IsAcyclic, false);
-        var box = decoder.Decode(genome);
-
+        var champion = ChampionLoader.Load(path);
         var species = ResolveSpecies(opts.GetValueOrDefault("species", "black-garden-ant"));
         bool nearFood = opts.GetValueOrDefault("food", "near") != "far";
-        var config = new WorldConfig
+        var config = BuildConfig(ticks, nearFood);
+        var runner = new EpisodeRunner();
+
+        Console.WriteLine($"Evaluating {champion.Label} | species {species.Id} | food {(nearFood ? "near" : "far")} | " +
+                          $"lane {lane} (runseed={runSeed}) base={baseSeed}, {episodes} episodes of {ticks} ticks.");
+        Console.WriteLine($"{"ep",4}  {"seed",13}  {"delivered",10}  {"pickedUp",9}  {"alive",6}");
+
+        double delivered = 0, pickedUp = 0;
+        for (int i = 0; i < episodes; i++)
+        {
+            ulong seed = baseSeed + (ulong)i;
+            var result = runner.Run(config, species, champion.BrainFactory, champion.Body, champion.Plasticity, seed);
+            delivered += result.FoodDelivered;
+            pickedUp += result.FoodPickedUp;
+            Console.WriteLine($"{i + 1,4}  {seed,13}  {result.FoodDelivered,10}  {result.FoodPickedUp,9}  {result.AntsAlive,6}");
+        }
+
+        double ceiling = (double)config.FoodSourceCount * config.FoodPerSource;
+        double meanDelivered = delivered / episodes;
+        Console.WriteLine($"Mean delivered: {meanDelivered:F2} of {ceiling:F0} available per episode " +
+                          $"({100.0 * meanDelivered / ceiling:F1}% of the food on the map).");
+        Console.WriteLine($"Mean fitness (delivered + 0.05*pickedUp): {(delivered + 0.05 * pickedUp) / episodes:F2}");
+    }
+
+    // ------------------------------------------------------------------ config
+
+    /// <summary>World config from CLI options (the food curriculum distance follows `food=near|far`).</summary>
+    private static WorldConfig BuildConfig(int ticks, bool nearFood)
+        => new()
         {
             EpisodeTicks = ticks,
             MinFoodDistanceFromNest = nearFood ? 120f : 250f,
             MaxFoodDistanceFromNest = nearFood ? 220f : 350f,
         };
-        var runner = new EpisodeRunner();
-        var brainFactory = new NeatBrainFactory(box);
-
-        Console.WriteLine($"Evaluating champion ({genome.ConnectionGenes.Length} connections, complexity {genome.Complexity:F1}) " +
-                          $"on {episodes} episodes of {ticks} ticks.");
-
-        double total = 0;
-        for (int i = 0; i < episodes; i++)
-        {
-            var result = runner.Run(config, species, brainFactory, seed: seed + (ulong)i);
-            total += result.FoodDelivered;
-            Console.WriteLine($"  seed {seed + (ulong)i}: delivered {result.FoodDelivered}, " +
-                              $"picked up {result.FoodPickedUp}, alive {result.AntsAlive}");
-        }
-
-        Console.WriteLine($"Mean delivered: {total / episodes:F2}");
-    }
 
     // ------------------------------------------------------------------ misc
 
@@ -299,7 +304,9 @@ public static class Program
               demo      species=black-garden-ant ticks=4000 seed=1 [replay=replay.json] [brain=champion.neat] [food=near|far]
               bench     ticks=4000 runs=3
               evolve    gens=100 popsize=128 seed=12345 [out=output] [species=...] [episodes=2] [ticks=4000] [workers=150]
-              evaluate  path=output/champion.neat episodes=3 seed=1000
+                        [valepisodes=3] [valinterval=5]
+              evaluate  path=output/champion.neat [lane=val|train|raw] [runseed=12345] [episodes=3] [ticks=4000]
+                        [food=near|far] [seed=N (lane=raw only)] [species=...]
             """);
     }
 }
